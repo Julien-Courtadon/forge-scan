@@ -19,21 +19,32 @@ function safe(v, fallback = "Non renseigne") {
   return v === undefined || v === null || v === "" ? fallback : String(v);
 }
 
-function scoreBand(score, inverse = false) {
+function forgeLevel(score) {
   const n = Number(score);
   if (!Number.isFinite(n)) return "NON DISPONIBLE";
-  if (inverse) {
-    if (n >= 80) return "CRITIQUE";
-    if (n >= 60) return "ELEVEE";
-    if (n >= 40) return "SIGNIFICATIVE";
-    if (n >= 20) return "MODEREE";
-    return "FAIBLE";
-  }
   if (n >= 85) return "INVESTISSEUR";
   if (n >= 70) return "PROPRIETAIRE";
   if (n >= 55) return "BATISSEUR";
   if (n >= 40) return "OPERATEUR";
   return "PRISONNIER";
+}
+
+function indicatorBand(score, inverse = false) {
+  const n = Number(score);
+  if (!Number.isFinite(n)) return "NON DISPONIBLE";
+  if (inverse) {
+    if (n >= 80) return "CRITIQUE";
+    if (n >= 60) return "ELEVE";
+    if (n >= 40) return "SIGNIFICATIF";
+    if (n >= 20) return "MODERE";
+    return "FAIBLE";
+  }
+  if (n >= 85) return "EXCELLENT";
+  if (n >= 70) return "SOLIDE";
+  if (n >= 55) return "STRUCTURE";
+  if (n >= 40) return "FRAGILE";
+  if (n >= 20) return "FAIBLE";
+  return "TRES FAIBLE";
 }
 
 function overallInsight(scores) {
@@ -43,19 +54,35 @@ function overallInsight(scores) {
   const asset = Number(scores.asset_index ?? 0);
   const frag = Number(scores.fragility_index ?? 0);
 
-  if (forge < 40 && dep >= 70) {
-    return "Votre entreprise produit de l'activite, mais une part importante de son fonctionnement reste encore attachee au dirigeant. La priorite n'est pas d'ajouter davantage de croissance : elle est de consolider l'organisation pour que l'entreprise puisse fonctionner, decider et vendre avec moins de dependance.";
+  if (forge < 40 && dep >= 70 && frag >= 70) {
+    return "Votre entreprise genere de l activite, mais sa capacite a fonctionner sans le dirigeant reste faible. Avec une dependance et une fragilite elevees, la croissance peut augmenter la charge du dirigeant plus vite que la valeur de l entreprise. La priorite est donc de securiser le systeme avant d accelerer.";
+  }
+  if (dep >= 70) {
+    return "La dependance au dirigeant est aujourd hui le signal le plus structurant. Tant que les decisions, la vente ou le pilotage restent fortement attaches a une personne, l entreprise demeure difficile a rendre autonome, scalable et transmissible.";
   }
   if (frag >= 70) {
-    return "Le diagnostic fait ressortir une fragilite structurelle importante. Plusieurs fonctions critiques reposent encore sur des personnes, des arbitrages ou des mecanismes insuffisamment securises. Avant d'accelerer, l'enjeu est de reduire les points uniques de defaillance.";
+    return "Le diagnostic revele plusieurs points uniques de defaillance. Une entreprise peut etre rentable tout en restant fragile : l enjeu est de securiser les relais, le savoir et les mecanismes critiques avant d augmenter la complexite.";
   }
   if (pred < 50) {
-    return "La structure existe, mais la previsibilite reste insuffisante pour piloter sereinement les 90 prochains jours. L'enjeu est de rendre l'acquisition, la vente et le pilotage plus mesurables et reproductibles.";
+    return "La previsibilite reste insuffisante pour piloter sereinement les 90 prochains jours. L enjeu est de rendre acquisition, pipeline, ventes et pilotage plus mesurables afin de reduire le pilotage a vue.";
   }
   if (asset < 50) {
-    return "Votre entreprise fonctionne, mais sa valeur structurelle reste encore liee a l'implication de certaines personnes. Le prochain niveau consiste a transformer davantage de savoir, de decisions et de ventes en systemes transmissibles.";
+    return "L entreprise fonctionne, mais une partie de sa valeur structurelle reste encore attachee a des personnes plutot qu a des systemes. Le prochain niveau consiste a transformer davantage de savoir, de decisions et de ventes en actifs transmissibles.";
   }
-  return "Votre entreprise dispose de bases structurelles solides. Le prochain enjeu consiste a renforcer les leviers qui augmentent simultanement autonomie, previsibilite et valeur d'actif.";
+  return "Votre entreprise dispose de bases structurelles solides. Le prochain enjeu consiste a augmenter simultanement autonomie, previsibilite et valeur d actif sans recreer de dependance au dirigeant.";
+}
+
+function businessConsequences(scores) {
+  const dep = Number(scores.dependency_index ?? 0);
+  const pred = Number(scores.predictability_index ?? 0);
+  const asset = Number(scores.asset_index ?? 0);
+  const frag = Number(scores.fragility_index ?? 0);
+  const items = [];
+  if (dep >= 60) items.push("Scalabilite limitee : davantage de croissance peut entrainer davantage de sollicitations du dirigeant.");
+  if (frag >= 60) items.push("Risque operationnel : une absence, un depart ou un incident peut affecter plusieurs fonctions critiques.");
+  if (pred < 50) items.push("Previsibilite faible : chiffre d affaires, ressources et decisions restent plus difficiles a anticiper.");
+  if (asset < 50) items.push("Valeur d actif reduite : une partie du savoir et de la performance reste attachee aux personnes plutot qu au systeme.");
+  return items.slice(0, 3);
 }
 
 function consequenceFor(code) {
@@ -218,7 +245,7 @@ exports.handler = async (event) => {
     doc.font("Helvetica-Bold").fontSize(16).fillColor(COLORS.ivory).text("/100", 143, 243, { lineBreak: false });
     doc.font("Helvetica-Bold").fontSize(7).fillColor("#8F8F8F").text("NIVEAU", 65, 304, { lineBreak: false });
     doc.font("Helvetica-Bold").fontSize(12).fillColor(COLORS.ivory)
-      .text(scoreBand(scores.forge_score), 65, 322, { lineBreak: false });
+      .text(forgeLevel(scores.forge_score), 65, 322, { lineBreak: false });
 
     doc.font("Helvetica-Bold").fontSize(14).fillColor(COLORS.ivory)
       .text("Ce que vos reponses indiquent", 285, 180, { lineBreak: false });
@@ -229,27 +256,31 @@ exports.handler = async (event) => {
     const gap = 8;
     const cardW = (505 - 3 * gap) / 4;
     metricCard(doc, 45, cardY, cardW, "DEPENDANCE DIRIGEANT",
-      `${safe(scores.dependency_index, "-")}%`, scoreBand(scores.dependency_index, true),
+      `${safe(scores.dependency_index, "-")}%`, indicatorBand(scores.dependency_index, true),
       Number(scores.dependency_index) >= 60);
     metricCard(doc, 45 + cardW + gap, cardY, cardW, "PREVISIBILITE",
-      `${safe(scores.predictability_index, "-")}/100`, scoreBand(scores.predictability_index));
+      `${safe(scores.predictability_index, "-")}/100`, indicatorBand(scores.predictability_index));
     metricCard(doc, 45 + (cardW + gap) * 2, cardY, cardW, "INDICE D'ACTIF",
-      `${safe(scores.asset_index, "-")}/100`, scoreBand(scores.asset_index));
+      `${safe(scores.asset_index, "-")}/100`, indicatorBand(scores.asset_index));
     metricCard(doc, 45 + (cardW + gap) * 3, cardY, cardW, "FRAGILITE",
-      `${safe(scores.fragility_index, "-")}/100`, scoreBand(scores.fragility_index, true),
+      `${safe(scores.fragility_index, "-")}/100`, indicatorBand(scores.fragility_index, true),
       Number(scores.fragility_index) >= 60);
 
-    doc.font("Helvetica-Bold").fontSize(8).fillColor(COLORS.gold).text("LECTURE FORGE", 45, 510, { lineBreak: false });
-    doc.font("Helvetica-Bold").fontSize(12).fillColor(COLORS.black)
-      .text("Le score n'est pas le diagnostic final.", 45, 534, { lineBreak: false });
-    doc.font("Helvetica").fontSize(9.5).fillColor(COLORS.text)
-      .text("Il montre ou se concentrent les tensions. La suite consiste a comprendre pourquoi elles existent, ce qu'elles coutent et dans quel ordre les traiter.",
-        45, 557, { width: 500, lineGap: 3 });
+    doc.font("Helvetica-Bold").fontSize(8).fillColor(COLORS.gold).text("IMPACT BUSINESS POTENTIEL", 45, 505, { lineBreak: false });
 
-    doc.roundedRect(45, 625, 505, 70, 5).fill(COLORS.light);
-    doc.font("Helvetica-Bold").fontSize(7).fillColor(COLORS.gold).text("QUESTION CENTRALE", 62, 645, { lineBreak: false });
-    doc.font("Helvetica-Bold").fontSize(11).fillColor(COLORS.black)
-      .text("Si vous vous absentez totalement pendant 30 jours, qu'est-ce qui casse en premier ?", 62, 668, { width: 455 });
+    const consequences = businessConsequences(scores);
+    let impactY = 530;
+    consequences.forEach((item, idx) => {
+      doc.font("Helvetica-Bold").fontSize(13).fillColor(COLORS.gold).text(String(idx + 1), 58, impactY, { lineBreak: false });
+      doc.font("Helvetica").fontSize(8.7).fillColor(COLORS.text)
+        .text(item, 82, impactY - 1, { width: 455, lineGap: 2 });
+      impactY += 42;
+    });
+
+    doc.roundedRect(45, 655, 505, 58, 5).fill(COLORS.black);
+    doc.font("Helvetica-Bold").fontSize(7).fillColor(COLORS.gold2).text("LA QUESTION QUI CHANGE LE DIAGNOSTIC", 62, 670, { lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(10.5).fillColor(COLORS.ivory)
+      .text("Si vous vous absentez totalement pendant 30 jours, qu est-ce qui casse en premier ?", 62, 691, { width: 455 });
 
     addFooter(doc, 2, clientLabel);
 
@@ -258,7 +289,7 @@ exports.handler = async (event) => {
     addSectionTitle(
       doc,
       "02",
-      "VOS 3 DEPENDANCES PRIORITAIRES",
+      "VOS 3 POINTS DE DEPENDANCE PRIORITAIRES",
       "Ces trois sujets sont les signaux les plus structurants detectes par votre Scan. Ils doivent etre approfondis avant de definir un plan de transformation."
     );
 
@@ -278,11 +309,11 @@ exports.handler = async (event) => {
       doc.font("Helvetica").fontSize(8.8).fillColor(COLORS.text)
         .text(why, 110, cy + 76, { width: 410, lineGap: 2 });
 
-      doc.font("Helvetica-Bold").fontSize(6.5).fillColor(COLORS.gold).text("IMPACT POTENTIEL", 110, cy + 111, { lineBreak: false });
+      doc.font("Helvetica-Bold").fontSize(6.5).fillColor(COLORS.gold).text("CONSEQUENCE BUSINESS", 110, cy + 111, { lineBreak: false });
       doc.font("Helvetica").fontSize(8.8).fillColor(COLORS.text)
         .text(consequenceFor(code), 110, cy + 129, { width: 410, lineGap: 2 });
 
-      doc.font("Helvetica-Bold").fontSize(6.5).fillColor(COLORS.muted).text("A CREUSER EN ENTRETIEN", 110, cy + 157, { lineBreak: false });
+      doc.font("Helvetica-Bold").fontSize(6.5).fillColor(COLORS.muted).text("QUESTION A TRAITER EN ENTRETIEN", 110, cy + 157, { lineBreak: false });
       doc.font("Helvetica-Bold").fontSize(8.3).fillColor(COLORS.black)
         .text(questionFor(code), 250, cy + 155, { width: 270 });
 
@@ -296,12 +327,12 @@ exports.handler = async (event) => {
     addSectionTitle(
       doc,
       "03",
-      "LE SCAN VOUS MONTRE OU AGIR.",
-      "Le Diagnostic FORGE 360 determine pourquoi, dans quel ordre et avec quels leviers."
+      "VOUS AVEZ LE QUOI. CONSTRUISONS LE POURQUOI ET LE COMMENT.",
+      "Le Diagnostic FORGE 360 transforme vos scores en trajectoire de transformation priorisee."
     );
 
     doc.font("Helvetica").fontSize(9.3).fillColor(COLORS.muted)
-      .text("Deux entreprises avec le meme FORGE Score peuvent avoir des causes radicalement differentes. Le rendez-vous permet de passer du symptome au plan d'action.",
+      .text("Deux entreprises avec le meme score peuvent avoir des causes radicalement differentes. L entretien permet de comprendre la cause racine, mesurer l impact et choisir la premiere transformation a engager.",
         45, 145, { width: 500, lineGap: 3 });
 
     const blocks = [
@@ -325,7 +356,7 @@ exports.handler = async (event) => {
     doc.font("Helvetica-Bold").fontSize(19).fillColor(COLORS.ivory)
       .text("DIAGNOSTIC FORGE 360", 72, 557, { lineBreak: false });
     doc.font("Helvetica").fontSize(9).fillColor("#D0CCC4")
-      .text("45 minutes pour transformer vos scores en priorites de transformation claires.",
+      .text("45 minutes pour identifier la cause de vos 3 dependances, leur impact reel et la premiere sequence a engager.",
         72, 590, { width: 270, lineGap: 3 });
 
     doc.image(qrBuffer, 390, 540, { width: 112, height: 112 });

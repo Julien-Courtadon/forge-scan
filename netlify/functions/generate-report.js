@@ -1,6 +1,7 @@
 const PDFDocument = require("pdfkit");
 const QRCode = require("qrcode");
 const { createClient } = require("@supabase/supabase-js");
+const path = require("path");
 
 const C = {
   black: "#070707",
@@ -156,6 +157,8 @@ function metricCard(doc, x, y, w, label, value, band, danger = false) {
   doc.font("Helvetica-Bold").fontSize(6.1).fillColor(C.black).text(band, x + 11, y + 60, { width: w - 22 });
 }
 
+const FORGE_LOGO_PATH = path.resolve(process.cwd(), "assets/forge-logo.png");
+
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
@@ -200,9 +203,8 @@ exports.handler = async (event) => {
 
     // PAGE 1
     doc.rect(0, 0, 595, 842).fill(C.black);
-    doc.font("Helvetica").fontSize(28).fillColor(C.ivory).text("F O R G", 45, 54, { lineBreak: false });
-    doc.font("Helvetica-Bold").fontSize(28).fillColor(C.gold).text("E", 197, 54, { lineBreak: false });
-    doc.font("Helvetica-Bold").fontSize(7).fillColor(C.gold).text("DU JOB À L'ACTIF", 47, 91, { lineBreak: false });
+    // Logo FORGE officiel fourni par le client
+    doc.image(FORGE_LOGO_PATH, 45, 45, { fit: [235, 82], align: "left", valign: "top" });
 
     doc.font("Helvetica-Bold").fontSize(8).fillColor(C.gold)
       .text("FORGE SCAN - RAPPORT PERSONNALISÉ", 45, 150, { lineBreak: false });
@@ -325,13 +327,13 @@ exports.handler = async (event) => {
     addSectionTitle(
       doc,
       "03",
-      "VOUS AVEZ LE QUOI. CONSTRUISONS LE POURQUOI ET LE COMMENT.",
-      "Le Diagnostic FORGE 360 transforme vos scores en trajectoire de transformation priorisée."
+      "DU DIAGNOSTIC AU PLAN D'ACTION",
+      "Vos scores indiquent où agir. Le Diagnostic FORGE 360 permet de comprendre pourquoi et dans quel ordre transformer l'entreprise."
     );
 
     doc.font("Helvetica").fontSize(9).fillColor(C.muted)
-      .text("Deux entreprises avec le même score peuvent avoir des causes radicalement différentes. L'entretien permet de comprendre la cause racine, mesurer l'impact et choisir la première transformation à engager.",
-        45, 142, { width: 500, lineGap: 3 });
+      .text("Le scan révèle les symptômes. L'entretien FORGE identifie leurs causes, leur coût réel et la séquence de transformation qui produira le plus d'effet de levier.",
+        45, 148, { width: 500, lineGap: 3 });
 
     const blocks = [
       ["1", "IDENTIFIER LA CAUSE RACINE", "Comprendre ce qui entretient réellement chaque dépendance : organisation, rôles, management, vente, process ou pilotage."],
@@ -339,7 +341,7 @@ exports.handler = async (event) => {
       ["3", "PRIORISER LA TRANSFORMATION", "Choisir la séquence qui produit le plus d'effet de levier sans ajouter une nouvelle couche de complexité."]
     ];
 
-    let by = 198;
+    let by = 202;
     for (const [n, t, d] of blocks) {
       doc.roundedRect(45, by, 505, 76, 5).fill(C.light);
       doc.font("Helvetica-Bold").fontSize(18).fillColor(C.gold).text(n, 62, by + 23, { lineBreak: false });
@@ -354,7 +356,7 @@ exports.handler = async (event) => {
     doc.font("Helvetica-Bold").fontSize(7).fillColor(C.gold2).text("VOTRE PROCHAINE ÉTAPE", 72, 520, { lineBreak: false });
     doc.font("Helvetica-Bold").fontSize(19).fillColor(C.ivory).text("DIAGNOSTIC FORGE 360", 72, 548, { lineBreak: false });
     doc.font("Helvetica").fontSize(8.8).fillColor("#D0CCC4")
-      .text("45 minutes pour identifier la cause de vos 3 dépendances, leur impact réel et la première séquence à engager.",
+      .text("45 minutes pour transformer vos 3 priorités en décisions concrètes et construire votre première feuille de route.",
         72, 580, { width: 275, lineGap: 3 });
 
     doc.image(qrBuffer, 392, 535, { width: 110, height: 110 });

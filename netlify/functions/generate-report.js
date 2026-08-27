@@ -2,27 +2,129 @@ const PDFDocument = require("pdfkit");
 const QRCode = require("qrcode");
 const { createClient } = require("@supabase/supabase-js");
 
+const COLORS = {
+  black: "#070707",
+  carbon: "#111214",
+  gold: "#C9A253",
+  gold2: "#E3BE6A",
+  ivory: "#F5F4F1",
+  text: "#1A1A1A",
+  muted: "#747474",
+  light: "#F3F1EC",
+  line: "#D8D3CA",
+  white: "#FFFFFF"
+};
+
 function safe(v, fallback = "Non renseigne") {
   return v === undefined || v === null || v === "" ? fallback : String(v);
 }
 
+function scoreBand(score, inverse = false) {
+  const n = Number(score);
+  if (!Number.isFinite(n)) return "NON DISPONIBLE";
+  if (inverse) {
+    if (n >= 80) return "CRITIQUE";
+    if (n >= 60) return "ELEVEE";
+    if (n >= 40) return "SIGNIFICATIVE";
+    if (n >= 20) return "MODEREE";
+    return "FAIBLE";
+  }
+  if (n >= 85) return "INVESTISSEUR";
+  if (n >= 70) return "PROPRIETAIRE";
+  if (n >= 55) return "BATISSEUR";
+  if (n >= 40) return "OPERATEUR";
+  return "PRISONNIER";
+}
+
+function overallInsight(scores) {
+  const forge = Number(scores.forge_score ?? 0);
+  const dep = Number(scores.dependency_index ?? 0);
+  const pred = Number(scores.predictability_index ?? 0);
+  const asset = Number(scores.asset_index ?? 0);
+  const frag = Number(scores.fragility_index ?? 0);
+
+  if (forge < 40 && dep >= 70) {
+    return "Votre entreprise produit de l'activite, mais une part importante de son fonctionnement reste encore attachee au dirigeant. La priorite n'est pas d'ajouter davantage de croissance : elle est de consolider l'organisation pour que l'entreprise puisse fonctionner, decider et vendre avec moins de dependance.";
+  }
+  if (frag >= 70) {
+    return "Le diagnostic fait ressortir une fragilite structurelle importante. Plusieurs fonctions critiques reposent encore sur des personnes, des arbitrages ou des mecanismes insuffisamment securises. Avant d'accelerer, l'enjeu est de reduire les points uniques de defaillance.";
+  }
+  if (pred < 50) {
+    return "La structure existe, mais la previsibilite reste insuffisante pour piloter sereinement les 90 prochains jours. L'enjeu est de rendre l'acquisition, la vente et le pilotage plus mesurables et reproductibles.";
+  }
+  if (asset < 50) {
+    return "Votre entreprise fonctionne, mais sa valeur structurelle reste encore liee a l'implication de certaines personnes. Le prochain niveau consiste a transformer davantage de savoir, de decisions et de ventes en systemes transmissibles.";
+  }
+  return "Votre entreprise dispose de bases structurelles solides. Le prochain enjeu consiste a renforcer les leviers qui augmentent simultanement autonomie, previsibilite et valeur d'actif.";
+}
+
+function consequenceFor(code) {
+  const map = {
+    FOUNDER_CRITICAL: "Cette configuration peut limiter la capacite du dirigeant a se concentrer sur la strategie, ralentir les decisions et rendre la croissance plus couteuse en energie.",
+    NO_SECOND_IN_COMMAND: "Sans relais de pilotage, l'absence du dirigeant peut rapidement devenir un risque operationnel et ralentir la prise de decision.",
+    FOUNDER_FIREFIGHTER: "Le mode pompier entretient la dependance, fragilise la priorisation et reduit le temps consacre aux sujets a fort effet de levier.",
+    KEY_PERSON_RISK: "Une personne cle peut devenir un point unique de defaillance et compliquer la continuite d'activite, l'onboarding ou la transmission.",
+    KNOWLEDGE_NOT_SYSTEMIZED: "Un savoir non formalise reste difficile a deleguer, a automatiser et a transmettre. Il limite directement l'autonomie de l'organisation.",
+    ACQUISITION_DEPENDENCY: "Une acquisition peu reproductible rend le chiffre d'affaires plus difficile a anticiper et augmente la pression commerciale sur le dirigeant.",
+    FOUNDER_LED_SALES: "Lorsque le fondateur reste indispensable a la vente, la croissance commerciale reste mecaniquement liee a sa disponibilite.",
+    LOW_VISIBILITY: "Un pilotage insuffisamment visible rend les arbitrages plus reactifs et limite la capacite a anticiper les besoins de tresorerie, de recrutement ou de production.",
+    MARGIN_BLINDNESS: "Une lecture insuffisante de la marge peut conduire a developper des activites qui consomment beaucoup de ressources sans creer suffisamment de valeur."
+  };
+  return map[code] || "Ce point peut limiter l'autonomie, la previsibilite ou la capacite de l'entreprise a absorber sa croissance.";
+}
+
+function questionFor(code) {
+  const map = {
+    FOUNDER_CRITICAL: "Quelles decisions reviennent encore systematiquement jusqu'a vous - et pourquoi ?",
+    NO_SECOND_IN_COMMAND: "Qui pourrait aujourd'hui reprendre le pilotage pendant deux semaines sans vous ?",
+    FOUNDER_FIREFIGHTER: "Quels sont les trois problemes qui reviennent le plus souvent jusqu'a vous ?",
+    KEY_PERSON_RISK: "Que se passerait-il si cette personne cle etait absente demain pendant un mois ?",
+    KNOWLEDGE_NOT_SYSTEMIZED: "Quel savoir critique n'existe encore que dans la tete d'une personne ?",
+    ACQUISITION_DEPENDENCY: "Si vous deviez generer 20 opportunites le mois prochain, quel canal utiliseriez-vous avec certitude ?",
+    FOUNDER_LED_SALES: "Quelle part du chiffre d'affaires ne serait pas signee si vous ne participiez plus aux ventes ?",
+    LOW_VISIBILITY: "Quels chiffres vous permettent aujourd'hui de prevoir les 90 prochains jours ?",
+    MARGIN_BLINDNESS: "Quels clients et offres creent reellement le plus de marge une fois tous les couts integres ?"
+  };
+  return map[code] || "Quelle est la cause racine de cette dependance dans votre organisation ?";
+}
+
 function addFooter(doc, pageNum, clientLabel) {
-  const y = 790;
-  doc.moveTo(45, y).lineTo(550, y).strokeColor("#d8d3ca").lineWidth(0.5).stroke();
-  doc.font("Helvetica").fontSize(7).fillColor("#777777")
-    .text("FORGE - RAPPORT PERSONNEL ET CONFIDENTIEL", 45, y + 8, { width: 320 });
-  doc.text(`Page ${pageNum}`, 480, y + 8, { width: 70, align: "right" });
+  // IMPORTANT: footer kept above PDFKit's bottom margin to avoid creating phantom pages.
+  const y = 755;
   doc.save();
-  doc.fillColor("#bbbbbb").opacity(0.11).font("Helvetica-Bold").fontSize(18);
-  doc.rotate(30, { origin: [300, 420] });
-  doc.text(clientLabel, 110, 400, { width: 400, align: "center" });
+  doc.moveTo(45, y).lineTo(550, y).strokeColor(COLORS.line).lineWidth(0.5).stroke();
+  doc.font("Helvetica-Bold").fontSize(6.5).fillColor(COLORS.muted)
+    .text("FORGE - RAPPORT PERSONNEL ET CONFIDENTIEL", 45, y + 9, {
+      width: 300, lineBreak: false
+    });
+  doc.font("Helvetica").fontSize(6.5).fillColor(COLORS.muted)
+    .text(`Page ${pageNum}`, 490, y + 9, {
+      width: 60, align: "right", lineBreak: false
+    });
+
+  doc.fillColor("#C8C8C8").opacity(0.08).font("Helvetica-Bold").fontSize(16);
+  doc.rotate(30, { origin: [300, 415] });
+  doc.text(clientLabel, 100, 400, { width: 400, align: "center", lineBreak: false });
   doc.restore();
   doc.opacity(1);
 }
 
-function addTitle(doc, n, title) {
-  doc.font("Helvetica-Bold").fontSize(10).fillColor("#c9a253").text(n, 45, 50);
-  doc.font("Helvetica-Bold").fontSize(23).fillColor("#111111").text(title, 45, 75);
+function addSectionTitle(doc, n, title, subtitle = "") {
+  doc.font("Helvetica-Bold").fontSize(10).fillColor(COLORS.gold).text(n, 45, 48);
+  doc.font("Helvetica-Bold").fontSize(22).fillColor(COLORS.black).text(title, 45, 72, { width: 500 });
+  if (subtitle) {
+    doc.font("Helvetica").fontSize(9).fillColor(COLORS.muted)
+      .text(subtitle, 45, 108, { width: 500, lineGap: 2 });
+  }
+}
+
+function metricCard(doc, x, y, w, label, value, band, danger = false) {
+  doc.roundedRect(x, y, w, 82, 5).fill(COLORS.light);
+  doc.font("Helvetica-Bold").fontSize(6.2).fillColor(COLORS.muted).text(label, x + 12, y + 13, { width: w - 24 });
+  doc.font("Helvetica-Bold").fontSize(20).fillColor(danger ? "#C83A3A" : COLORS.gold)
+    .text(value, x + 12, y + 33, { width: w - 24 });
+  doc.font("Helvetica-Bold").fontSize(6.3).fillColor(COLORS.black)
+    .text(band, x + 12, y + 62, { width: w - 24 });
 }
 
 exports.handler = async (event) => {
@@ -38,7 +140,7 @@ exports.handler = async (event) => {
 
     const company = payload.company || {};
     const scores = payload.scores || {};
-    const priorities = Array.isArray(scores.red_flags) ? scores.red_flags.slice(0,3) : [];
+    const priorities = Array.isArray(scores.red_flags) ? scores.red_flags.slice(0, 3) : [];
 
     const firstName = safe(company.first_name);
     const companyName = safe(company.company_name);
@@ -46,121 +148,200 @@ exports.handler = async (event) => {
     const email = safe(company.email);
     const clientLabel = `${companyName} - ${email}`;
 
-    const doc = new PDFDocument({ size: "A4", margin: 45 });
+    const doc = new PDFDocument({
+      size: "A4",
+      margins: { top: 45, bottom: 45, left: 45, right: 45 },
+      autoFirstPage: true,
+      info: {
+        Title: `FORGE SCAN - ${companyName}`,
+        Author: "FORGE",
+        Subject: "Diagnostic FORGE personnalise"
+      }
+    });
+
     const chunks = [];
     doc.on("data", c => chunks.push(c));
 
     const qrData = await QRCode.toDataURL(calendlyUrl, {
-      width: 260,
+      width: 300,
       margin: 1,
-      color: { dark: "#111111", light: "#ffffff" }
+      color: { dark: COLORS.black, light: COLORS.white }
     });
     const qrBuffer = Buffer.from(qrData.split(",")[1], "base64");
 
-    // PAGE 1
-    doc.rect(0,0,595,842).fill("#070707");
-    doc.font("Helvetica-Bold").fontSize(11).fillColor("#c9a253").text("FORGE",45,55);
-    doc.font("Helvetica-Bold").fontSize(8).fillColor("#c9a253").text("DU JOB A L'ACTIF",45,72);
-    doc.font("Helvetica-Bold").fontSize(8).fillColor("#c9a253").text("FORGE SCAN - RAPPORT PERSONNALISE",45,140);
-    doc.font("Helvetica-Bold").fontSize(30).fillColor("#f5f4f1")
-      .text("Votre entreprise\npeut-elle fonctionner",45,185,{lineGap:2});
-    doc.fillColor("#e3be6a").text("sans vous ?",45,265);
-    doc.rect(45,320,50,2).fill("#c9a253");
+    // PAGE 1 - COVER
+    doc.rect(0, 0, 595, 842).fill(COLORS.black);
 
-    doc.font("Helvetica-Bold").fontSize(15).fillColor("#f5f4f1").text(firstName,45,610);
-    doc.font("Helvetica-Bold").fontSize(11).fillColor("#c9a253").text(companyName,45,635);
-    doc.font("Helvetica").fontSize(8).fillColor("#aaa7a0").text(phone,45,657);
-    if(email !== "Non renseigne") doc.text(email,45,670);
-    doc.font("Helvetica").fontSize(8).fillColor("#aaa7a0")
-      .text(`Document personnel - Ref. ${reportRef}`,45,710);
-    doc.font("Helvetica-Bold").fontSize(7).fillColor("#c9a253")
-      .text("CLARTE   STRUCTURE   AUTONOMIE   PERFORMANCE   VALEUR   LIBERTE",45,770);
+    // Simple FORGE wordmark - no external asset required
+    doc.font("Helvetica").fontSize(28).fillColor(COLORS.ivory).text("F O R G", 45, 56, { lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(28).fillColor(COLORS.gold).text("E", 197, 56, { lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(7).fillColor(COLORS.gold).text("DU JOB A L'ACTIF", 47, 94, { lineBreak: false });
 
-    // PAGE 2
+    doc.font("Helvetica-Bold").fontSize(8).fillColor(COLORS.gold)
+      .text("FORGE SCAN - RAPPORT PERSONNALISE", 45, 155, { lineBreak: false });
+
+    doc.font("Helvetica-Bold").fontSize(29).fillColor(COLORS.ivory)
+      .text("Votre entreprise", 45, 198, { lineBreak: false });
+    doc.text("peut-elle fonctionner", 45, 236, { lineBreak: false });
+    doc.fillColor(COLORS.gold2).text("sans vous ?", 45, 274, { lineBreak: false });
+
+    doc.rect(45, 326, 52, 2).fill(COLORS.gold);
+
+    doc.font("Helvetica").fontSize(10.5).fillColor("#C7C4BD")
+      .text("Ce rapport est le reflet de vos reponses au FORGE SCAN. Il met en evidence les dependances qui limitent aujourd'hui l'autonomie, la previsibilite et la valeur structurelle de votre entreprise.",
+        45, 355, { width: 420, lineGap: 3 });
+
+    doc.font("Helvetica-Bold").fontSize(7).fillColor(COLORS.gold).text("ENTREPRISE ANALYSEE", 45, 600, { lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(16).fillColor(COLORS.ivory).text(companyName, 45, 625, { width: 380, lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(12).fillColor(COLORS.ivory).text(firstName, 45, 650, { width: 380, lineBreak: false });
+    doc.font("Helvetica").fontSize(8).fillColor("#AAA7A0").text(phone, 45, 673, { lineBreak: false });
+    if (email !== "Non renseigne") doc.text(email, 45, 688, { lineBreak: false });
+
+    doc.font("Helvetica").fontSize(7).fillColor("#8B8882")
+      .text(`Document personnel - Ref. ${reportRef}`, 45, 724, { lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(6.5).fillColor(COLORS.gold)
+      .text("CLARTE   STRUCTURE   AUTONOMIE   PERFORMANCE   VALEUR   LIBERTE", 45, 776, { lineBreak: false });
+
+    // PAGE 2 - SCORE
     doc.addPage();
-    addTitle(doc,"01","VOS NOTES FORGE");
-    doc.font("Helvetica").fontSize(9).fillColor("#747474")
-      .text("Ces indicateurs sont calcules a partir de vos reponses au FORGE SCAN.",45,112,{width:500});
-
-    doc.roundedRect(45,155,505,230,6).fill("#111214");
-    doc.font("Helvetica-Bold").fontSize(7).fillColor("#c9a253").text("FORGE SCORE",65,180);
-    doc.font("Helvetica-Bold").fontSize(64).fillColor("#e3be6a")
-      .text(safe(scores.forge_score,"-"),65,205);
-    doc.font("Helvetica-Bold").fontSize(16).fillColor("#f5f4f1").text("/100",140,245);
-
-    const metricRows = [
-      ["DEPENDANCE", scores.dependency_index !== undefined ? `${scores.dependency_index}%` : "-"],
-      ["PREVISIBILITE", scores.predictability_index !== undefined ? `${scores.predictability_index}/100` : "-"],
-      ["INDICE D'ACTIF", scores.asset_index !== undefined ? `${scores.asset_index}/100` : "-"],
-      ["FRAGILITE", scores.fragility_index !== undefined ? `${scores.fragility_index}/100` : "-"]
-    ];
-    let my = 182;
-    metricRows.forEach(([label,val]) => {
-      doc.font("Helvetica-Bold").fontSize(6.5).fillColor("#8f8f8f").text(label,300,my);
-      doc.font("Helvetica-Bold").fontSize(12).fillColor("#e3be6a").text(val,440,my-2);
-      my += 43;
-    });
-    doc.font("Helvetica-Bold").fontSize(8).fillColor("#c9a253").text("VOTRE LECTURE",45,430);
-    doc.font("Helvetica").fontSize(10).fillColor("#1a1a1a")
-      .text("Votre prochain niveau consiste a reduire les dependances les plus structurantes avant d'ajouter davantage de croissance ou de complexite.",45,455,{width:500,lineGap:3});
-    addFooter(doc,2,clientLabel);
-
-    // PAGE 3
-    doc.addPage();
-    addTitle(doc,"02","VOS 3 POINTS A AMELIORER");
-    doc.font("Helvetica").fontSize(9).fillColor("#747474")
-      .text("Les trois sujets ci-dessous sont classes selon leur priorite dans votre diagnostic.",45,112,{width:500});
-
-    let cy = 155;
-    for(let i=0;i<3;i++){
-      const p = priorities[i] || {};
-      doc.roundedRect(45,cy,505,155,6).fill("#f3f1ec");
-      doc.font("Helvetica-Bold").fontSize(24).fillColor("#c9a253").text(`0${i+1}`,62,cy+25);
-      doc.font("Helvetica-Bold").fontSize(12).fillColor("#111111")
-        .text(safe(p.title, `Priorite ${i+1}`),110,cy+25,{width:340});
-      if(p.priority !== undefined){
-        doc.font("Helvetica-Bold").fontSize(9).fillColor("#c9a253")
-          .text(`${p.priority}/100`,470,cy+28,{width:60,align:"right"});
-      }
-      doc.font("Helvetica-Bold").fontSize(6.5).fillColor("#c9a253").text("CONSTAT",110,cy+68);
-      doc.font("Helvetica").fontSize(9).fillColor("#222222")
-        .text(safe(p.why,"Point a approfondir pendant l'entretien."),110,cy+85,{width:400,lineGap:2});
-      doc.font("Helvetica-Bold").fontSize(6.5).fillColor("#777777").text("PREMIERE ACTION",110,cy+123);
-      doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#111111")
-        .text(safe(p.action,"Clarifier la cause et la priorite d'action."),110,cy+137,{width:400});
-      cy += 175;
-    }
-    addFooter(doc,3,clientLabel);
-
-    // PAGE 4
-    doc.addPage();
-    addTitle(doc,"03","TRANSFORMEZ VOS SCORES EN PLAN D'ACTION");
-    doc.font("Helvetica").fontSize(9.5).fillColor("#747474")
-      .text("Le Scan identifie ou se trouvent les tensions. L'entretien FORGE permet d'en comprendre la cause, le cout et l'ordre de traitement.",45,112,{width:500,lineGap:3});
-
-    doc.roundedRect(45,175,505,460,8).fill("#070707");
-    doc.font("Helvetica-Bold").fontSize(8).fillColor("#e3be6a").text("DIAGNOSTIC FORGE 360",75,215);
-    doc.font("Helvetica-Bold").fontSize(20).fillColor("#f5f4f1").text("45 minutes pour clarifier",75,250);
-    doc.fillColor("#e3be6a").text("vos 3 priorites.",75,278);
-
-    doc.font("Helvetica").fontSize(9).fillColor("#d0ccc4").text(
-      "Pendant cet echange, nous identifions la cause exacte de chaque dependance, son impact et la sequence de transformation la plus pertinente.",
-      75,325,{width:275,lineGap:3}
+    addSectionTitle(
+      doc,
+      "01",
+      "VOTRE DIAGNOSTIC EN UN COUP D'OEIL",
+      "Les indicateurs ci-dessous sont calcules a partir de vos reponses. Ils mesurent la maturite structurelle de l'entreprise - pas sa valeur financiere."
     );
 
-    doc.image(qrBuffer,380,335,{width:120,height:120});
-    doc.font("Helvetica-Bold").fontSize(7).fillColor("#e3be6a")
-      .text("SCANNEZ POUR RESERVER",370,465,{width:140,align:"center"});
-    doc.font("Helvetica").fontSize(7).fillColor("#a9a49a")
-      .text("calendly.com/jeforge/audit",365,480,{width:150,align:"center"});
+    doc.roundedRect(45, 150, 505, 210, 6).fill(COLORS.carbon);
+    doc.font("Helvetica-Bold").fontSize(7).fillColor(COLORS.gold).text("FORGE SCORE", 65, 176, { lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(62).fillColor(COLORS.gold2)
+      .text(safe(scores.forge_score, "-"), 65, 204, { lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(16).fillColor(COLORS.ivory).text("/100", 143, 243, { lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(7).fillColor("#8F8F8F").text("NIVEAU", 65, 304, { lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(12).fillColor(COLORS.ivory)
+      .text(scoreBand(scores.forge_score), 65, 322, { lineBreak: false });
 
-    doc.roundedRect(75,515,250,44,4).fill("#c9a253");
-    doc.font("Helvetica-Bold").fontSize(10).fillColor("#070707")
-      .text("RESERVER MON ENTRETIEN FORGE",75,530,{width:250,align:"center"});
+    doc.font("Helvetica-Bold").fontSize(14).fillColor(COLORS.ivory)
+      .text("Ce que vos reponses indiquent", 285, 180, { lineBreak: false });
+    doc.font("Helvetica").fontSize(9.2).fillColor("#CCC8C0")
+      .text(overallInsight(scores), 285, 208, { width: 235, lineGap: 3 });
 
-    doc.font("Helvetica").fontSize(7).fillColor("#8f8b83")
-      .text(`Rapport personnel : ${firstName} - ${companyName}`,75,590);
-    addFooter(doc,4,clientLabel);
+    const cardY = 390;
+    const gap = 8;
+    const cardW = (505 - 3 * gap) / 4;
+    metricCard(doc, 45, cardY, cardW, "DEPENDANCE DIRIGEANT",
+      `${safe(scores.dependency_index, "-")}%`, scoreBand(scores.dependency_index, true),
+      Number(scores.dependency_index) >= 60);
+    metricCard(doc, 45 + cardW + gap, cardY, cardW, "PREVISIBILITE",
+      `${safe(scores.predictability_index, "-")}/100`, scoreBand(scores.predictability_index));
+    metricCard(doc, 45 + (cardW + gap) * 2, cardY, cardW, "INDICE D'ACTIF",
+      `${safe(scores.asset_index, "-")}/100`, scoreBand(scores.asset_index));
+    metricCard(doc, 45 + (cardW + gap) * 3, cardY, cardW, "FRAGILITE",
+      `${safe(scores.fragility_index, "-")}/100`, scoreBand(scores.fragility_index, true),
+      Number(scores.fragility_index) >= 60);
+
+    doc.font("Helvetica-Bold").fontSize(8).fillColor(COLORS.gold).text("LECTURE FORGE", 45, 510, { lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(12).fillColor(COLORS.black)
+      .text("Le score n'est pas le diagnostic final.", 45, 534, { lineBreak: false });
+    doc.font("Helvetica").fontSize(9.5).fillColor(COLORS.text)
+      .text("Il montre ou se concentrent les tensions. La suite consiste a comprendre pourquoi elles existent, ce qu'elles coutent et dans quel ordre les traiter.",
+        45, 557, { width: 500, lineGap: 3 });
+
+    doc.roundedRect(45, 625, 505, 70, 5).fill(COLORS.light);
+    doc.font("Helvetica-Bold").fontSize(7).fillColor(COLORS.gold).text("QUESTION CENTRALE", 62, 645, { lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(11).fillColor(COLORS.black)
+      .text("Si vous vous absentez totalement pendant 30 jours, qu'est-ce qui casse en premier ?", 62, 668, { width: 455 });
+
+    addFooter(doc, 2, clientLabel);
+
+    // PAGE 3 - TOP 3
+    doc.addPage();
+    addSectionTitle(
+      doc,
+      "02",
+      "VOS 3 DEPENDANCES PRIORITAIRES",
+      "Ces trois sujets sont les signaux les plus structurants detectes par votre Scan. Ils doivent etre approfondis avant de definir un plan de transformation."
+    );
+
+    let cy = 150;
+    for (let i = 0; i < 3; i++) {
+      const p = priorities[i] || {};
+      const code = p.code || "";
+      const title = safe(p.title, `Priorite ${i + 1}`);
+      const why = safe(p.why, "Point a approfondir pendant l'entretien.");
+
+      doc.roundedRect(45, cy, 505, 175, 6).fill(COLORS.light);
+      doc.font("Helvetica-Bold").fontSize(22).fillColor(COLORS.gold).text(`0${i + 1}`, 62, cy + 22, { lineBreak: false });
+      doc.font("Helvetica-Bold").fontSize(12).fillColor(COLORS.black)
+        .text(title, 110, cy + 24, { width: 385 });
+
+      doc.font("Helvetica-Bold").fontSize(6.5).fillColor(COLORS.gold).text("SIGNAL", 110, cy + 58, { lineBreak: false });
+      doc.font("Helvetica").fontSize(8.8).fillColor(COLORS.text)
+        .text(why, 110, cy + 76, { width: 410, lineGap: 2 });
+
+      doc.font("Helvetica-Bold").fontSize(6.5).fillColor(COLORS.gold).text("IMPACT POTENTIEL", 110, cy + 111, { lineBreak: false });
+      doc.font("Helvetica").fontSize(8.8).fillColor(COLORS.text)
+        .text(consequenceFor(code), 110, cy + 129, { width: 410, lineGap: 2 });
+
+      doc.font("Helvetica-Bold").fontSize(6.5).fillColor(COLORS.muted).text("A CREUSER EN ENTRETIEN", 110, cy + 157, { lineBreak: false });
+      doc.font("Helvetica-Bold").fontSize(8.3).fillColor(COLORS.black)
+        .text(questionFor(code), 250, cy + 155, { width: 270 });
+
+      cy += 190;
+    }
+
+    addFooter(doc, 3, clientLabel);
+
+    // PAGE 4 - CTA
+    doc.addPage();
+    addSectionTitle(
+      doc,
+      "03",
+      "LE SCAN VOUS MONTRE OU AGIR.",
+      "Le Diagnostic FORGE 360 determine pourquoi, dans quel ordre et avec quels leviers."
+    );
+
+    doc.font("Helvetica").fontSize(9.3).fillColor(COLORS.muted)
+      .text("Deux entreprises avec le meme FORGE Score peuvent avoir des causes radicalement differentes. Le rendez-vous permet de passer du symptome au plan d'action.",
+        45, 145, { width: 500, lineGap: 3 });
+
+    const blocks = [
+      ["1", "IDENTIFIER LA CAUSE RACINE", "Comprendre ce qui entretient reellement chaque dependance : organisation, roles, management, vente, process ou pilotage."],
+      ["2", "MESURER SON IMPACT", "Qualifier l'impact sur le temps du dirigeant, les equipes, la croissance, la marge et la capacite a s'absenter."],
+      ["3", "PRIORISER LA TRANSFORMATION", "Choisir la sequence de travail qui produit le plus d'effet de levier sans ajouter une nouvelle couche de complexite."]
+    ];
+
+    let by = 205;
+    for (const [n, t, d] of blocks) {
+      doc.roundedRect(45, by, 505, 78, 5).fill(COLORS.light);
+      doc.font("Helvetica-Bold").fontSize(18).fillColor(COLORS.gold).text(n, 62, by + 24, { lineBreak: false });
+      doc.font("Helvetica-Bold").fontSize(10).fillColor(COLORS.black).text(t, 98, by + 18, { lineBreak: false });
+      doc.font("Helvetica").fontSize(8.4).fillColor(COLORS.text).text(d, 98, by + 38, { width: 425, lineGap: 2 });
+      by += 92;
+    }
+
+    doc.roundedRect(45, 505, 505, 205, 8).fill(COLORS.black);
+    doc.font("Helvetica-Bold").fontSize(7).fillColor(COLORS.gold2)
+      .text("VOTRE PROCHAINE ETAPE", 72, 530, { lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(19).fillColor(COLORS.ivory)
+      .text("DIAGNOSTIC FORGE 360", 72, 557, { lineBreak: false });
+    doc.font("Helvetica").fontSize(9).fillColor("#D0CCC4")
+      .text("45 minutes pour transformer vos scores en priorites de transformation claires.",
+        72, 590, { width: 270, lineGap: 3 });
+
+    doc.image(qrBuffer, 390, 540, { width: 112, height: 112 });
+    doc.font("Helvetica-Bold").fontSize(6.5).fillColor(COLORS.gold2)
+      .text("SCANNEZ POUR RESERVER", 378, 658, { width: 140, align: "center" });
+
+    doc.roundedRect(72, 642, 250, 42, 4).fill(COLORS.gold);
+    doc.font("Helvetica-Bold").fontSize(9.2).fillColor(COLORS.black)
+      .text("RESERVER MON ENTRETIEN FORGE", 72, 656, {
+        width: 250, align: "center", link: calendlyUrl, underline: false
+      });
+
+    doc.font("Helvetica").fontSize(6.8).fillColor("#8F8B83")
+      .text(`Rapport personnel : ${firstName} - ${companyName}`, 72, 694, { lineBreak: false });
+
+    addFooter(doc, 4, clientLabel);
 
     doc.end();
 
@@ -175,7 +356,7 @@ exports.handler = async (event) => {
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const bucket = process.env.SUPABASE_BUCKET || "forge-reports";
 
-    if(!supabaseUrl || !supabaseServiceKey){
+    if (!supabaseUrl || !supabaseServiceKey) {
       return {
         statusCode: 500,
         body: JSON.stringify({ error: "Supabase non configure sur Netlify." })
@@ -187,6 +368,7 @@ exports.handler = async (event) => {
     });
 
     const fileName = `${reportRef}.pdf`;
+
     const { error: uploadError } = await supabase.storage
       .from(bucket)
       .upload(fileName, pdfBuffer, {
@@ -194,13 +376,13 @@ exports.handler = async (event) => {
         upsert: false
       });
 
-    if(uploadError) throw uploadError;
+    if (uploadError) throw uploadError;
 
     const { data: signed, error: signError } = await supabase.storage
       .from(bucket)
       .createSignedUrl(fileName, 60 * 60 * 24 * 7);
 
-    if(signError) throw signError;
+    if (signError) throw signError;
 
     return {
       statusCode: 200,

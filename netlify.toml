@@ -4,3 +4,6 @@
 
 [functions]
   node_bundler = "esbuild"
+
+[functions."generate-report"]
+  included_files = ["node_modules/pdfkit/js/data/**"]

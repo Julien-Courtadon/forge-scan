@@ -302,11 +302,11 @@ body{background:radial-gradient(circle at 75% 15%,rgba(213,162,56,.055),transpar
         <div class="grid two" style="margin-top:24px">
           <div class="field">
             <label>Prénom</label>
-            <input id="firstName" placeholder="Julien" />
+            <input id="firstName" name="forge_first_name" type="text" value="" placeholder="" autocomplete="new-password" autocapitalize="words" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
           </div>
           <div class="field">
             <label>Entreprise</label>
-            <input id="companyName" placeholder="FORGE" />
+            <input id="companyName" name="forge_company_name" type="text" value="" placeholder="" autocomplete="new-password" autocapitalize="words" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
           </div>
           <div class="field">
             <label>Chiffre d’affaires annuel</label>
@@ -335,6 +335,7 @@ body{background:radial-gradient(circle at 75% 15%,rgba(213,162,56,.055),transpar
         </div>
         <div class="row" style="margin-top:24px">
           <button class="cta" onclick="startQuiz()">COMMENCER LE SCAN →</button>
+          <button class="cta ghost" onclick="clearForgeFields()">↻ EFFACER LES CHAMPS</button>
           <button class="cta ghost" onclick="showScreen('landing')">Retour</button>
         </div>
       </div>
@@ -356,7 +357,8 @@ body{background:radial-gradient(circle at 75% 15%,rgba(213,162,56,.055),transpar
         <div id="answers" class="answers"></div>
         <div id="followup" class="followup hidden"></div>
         <div class="nav">
-          <button id="prevBtn" class="cta ghost" onclick="prevQuestion()">← Retour</button>
+          <button id="prevBtn" class="cta ghost" onclick="prevQuestion()">← Question précédente</button>
+          <button class="cta ghost" onclick="exitScan()">⌂ Accueil</button>
           <button id="nextBtn" class="cta" onclick="nextQuestion()">Continuer →</button>
         </div>
       </div>
@@ -377,11 +379,11 @@ body{background:radial-gradient(circle at 75% 15%,rgba(213,162,56,.055),transpar
         <div class="grid two" style="margin-top:20px">
           <div class="field">
             <label>Email professionnel</label>
-            <input id="email" type="email" placeholder="vous@entreprise.fr" />
+            <input id="email" type="email" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other" placeholder="vous@entreprise.fr" autocomplete="off" />
           </div>
           <div class="field">
             <label>Téléphone</label>
-            <input id="phone" type="tel" placeholder="06 00 00 00 00" />
+            <input id="phone" type="tel" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other" placeholder="06 00 00 00 00" autocomplete="off" />
           </div>
         </div>
         <div class="row" style="margin-top:22px">
@@ -525,6 +527,58 @@ body{background:radial-gradient(circle at 75% 15%,rgba(213,162,56,.055),transpar
       window.scrollTo({top:0,behavior:"smooth"});
     }
 
+
+    function clearForgeFields(){
+      // Efface uniquement l'écran "Votre entreprise", sans changer d'écran.
+      state.profile = {};
+      state.answers = {};
+      state.followups = {};
+      state.lead = {};
+      state.results = null;
+      current = 0;
+
+      const firstName = document.getElementById("firstName");
+      const companyName = document.getElementById("companyName");
+      const revenueBand = document.getElementById("revenueBand");
+      const employeeBand = document.getElementById("employeeBand");
+
+      if(firstName){
+        firstName.value = "";
+        firstName.defaultValue = "";
+      }
+      if(companyName){
+        companyName.value = "";
+        companyName.defaultValue = "";
+      }
+      if(revenueBand) revenueBand.value = "";
+      if(employeeBand) employeeBand.value = "";
+
+      // Les coordonnées de fin de scan sont également remises à zéro.
+      ["email","phone"].forEach(id => {
+        const el = document.getElementById(id);
+        if(el){
+          el.value = "";
+          el.defaultValue = "";
+        }
+      });
+
+      // Nettoyage des données locales FORGE sans navigation.
+      try{
+        Object.keys(localStorage)
+          .filter(k => k.toLowerCase().startsWith("forge_"))
+          .forEach(k => localStorage.removeItem(k));
+      }catch(e){}
+      try{
+        Object.keys(sessionStorage)
+          .filter(k => k.toLowerCase().startsWith("forge_"))
+          .forEach(k => sessionStorage.removeItem(k));
+      }catch(e){}
+
+      // Reste volontairement sur l'écran qualification.
+      showScreen("qualification");
+      if(firstName) firstName.focus();
+    }
+
     function startQuiz(){
       state.profile = {
         first_name:document.getElementById('firstName').value.trim(),
@@ -543,7 +597,9 @@ body{background:radial-gradient(circle at 75% 15%,rgba(213,162,56,.055),transpar
       const pct=Math.round(((current+1)/questions.length)*100);
       document.getElementById('progressPct').textContent=`${pct} %`;
       document.getElementById('progressBar').style.width=`${pct}%`;
-      document.getElementById('prevBtn').style.visibility=current===0?'hidden':'visible';
+      const prevBtn = document.getElementById('prevBtn');
+      prevBtn.style.visibility = 'visible';
+      prevBtn.textContent = current===0 ? '← Informations' : '← Question précédente';
       const wrap=document.getElementById('answers'); wrap.innerHTML='';
       q.answers.forEach((a,i)=>{
         const b=document.createElement('button');
@@ -589,7 +645,21 @@ body{background:radial-gradient(circle at 75% 15%,rgba(213,162,56,.055),transpar
       }
     }
 
-    function prevQuestion(){ if(current>0){current--;renderQuestion();} }
+    function prevQuestion(){
+      if(current>0){
+        current--;
+        renderQuestion();
+      } else {
+        // Depuis la première question, retour aux informations entreprise
+        showScreen('qualification');
+      }
+    }
+
+    function exitScan(){
+      // Retour à l'écran principal sans effacer les réponses.
+      // Le bouton RESET reste disponible pour repartir complètement à zéro.
+      showScreen('landing');
+    }
 
     function nextQuestion(){
       const q=questions[current];
@@ -767,10 +837,36 @@ body{background:radial-gradient(circle at 75% 15%,rgba(213,162,56,.055),transpar
       document.getElementById('firstPriority').textContent=r.red_flags[0]?.action||"Concentrez-vous d’abord sur le principal point de dépendance détecté.";
     }
 
+    function blankForgeFields(){
+      ["firstName","companyName","email","phone"].forEach(id => {
+        const el = document.getElementById(id);
+        if(!el) return;
+        el.value = "";
+        el.defaultValue = "";
+        el.removeAttribute("value");
+        el.dispatchEvent(new Event("input", {bubbles:true}));
+        el.dispatchEvent(new Event("change", {bubbles:true}));
+      });
+
+      ["revenueBand","employeeBand"].forEach(id => {
+        const el = document.getElementById(id);
+        if(!el) return;
+        el.value = "";
+        el.selectedIndex = 0;
+        el.dispatchEvent(new Event("change", {bubbles:true}));
+      });
+
+      const submitStatus = document.getElementById("submitStatus");
+      if(submitStatus) submitStatus.textContent = "";
+    }
+
+    function resetForgeScan(goToLanding = true){
+      clearForgeFields();
+      if(goToLanding) showScreen("landing");
+    }
+
     function restart(){
-      state={profile:{},answers:{},followups:{},lead:{},results:null};
-      current=0;
-      showScreen('landing');
+      resetForgeScan(true);
     }
   
     async function openForgeWhatsApp(){
@@ -901,7 +997,6 @@ body{background:radial-gradient(circle at 75% 15%,rgba(213,162,56,.055),transpar
 
       window.open(url, "_blank", "noopener,noreferrer");
     }
-
 </script>
 </body>
 </html>

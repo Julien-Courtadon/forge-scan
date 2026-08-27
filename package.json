@@ -1,0 +1,10 @@
+{
+  "name": "forge-scan",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "pdfkit": "^0.15.0",
+    "qrcode": "^1.5.4"
+  }
+}
